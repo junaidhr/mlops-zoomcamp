@@ -35,9 +35,9 @@ def train_and_log_model(data_path, params):
         rf = RandomForestRegressor(**new_params)
         rf.fit(X_train, y_train)
 
-        # Evaluate model on the validation and test sets
         val_rmse = root_mean_squared_error(y_val, rf.predict(X_val))
         mlflow.log_metric("val_rmse", val_rmse)
+
         test_rmse = root_mean_squared_error(y_test, rf.predict(X_test))
         mlflow.log_metric("test_rmse", test_rmse)
 
@@ -58,23 +58,37 @@ def run_register_model(data_path: str, top_n: int):
 
     client = MlflowClient()
 
-    # Retrieve the top_n model runs and log the models
+    # Step 1: Get top_n runs from hyperopt experiment by lowest rmse
     experiment = client.get_experiment_by_name(HPO_EXPERIMENT_NAME)
     runs = client.search_runs(
-        experiment_ids=experiment.experiment_id,
+        experiment_ids=[experiment.experiment_id],
         run_view_type=ViewType.ACTIVE_ONLY,
         max_results=top_n,
         order_by=["metrics.rmse ASC"]
     )
+
+    # Step 2: Train and log these models again in a new experiment with test RMSE
     for run in runs:
         train_and_log_model(data_path=data_path, params=run.data.params)
 
-    # Select the model with the lowest test RMSE
-    experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
-    # best_run = client.search_runs( ...  )[0]
+    # Step 3: Find the best run from the new experiment by lowest test_rmse
+    experiment_best = client.get_experiment_by_name(EXPERIMENT_NAME)
+    best_run = client.search_runs(
+        experiment_ids=[experiment_best.experiment_id],
+        run_view_type=ViewType.ACTIVE_ONLY,
+        max_results=1,
+        order_by=["metrics.test_rmse ASC"]
+    )[0]
 
-    # Register the best model
-    # mlflow.register_model( ... )
+    print(f"Best run ID: {best_run.info.run_id}")
+    print(f"Best test RMSE: {best_run.data.metrics['test_rmse']}")
+
+    # Step 4: Register the best model to the model registry
+    model_uri = f"runs:/{best_run.info.run_id}/model"
+    registered_model_name = "random-forest-regressor-best"
+    mlflow.register_model(model_uri=model_uri, name=registered_model_name)
+
+    print(f"Registered model '{registered_model_name}' with run ID: {best_run.info.run_id}")
 
 
 if __name__ == '__main__':
