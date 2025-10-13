@@ -1,3 +1,3 @@
 # mlops-zoomcamp
 
-sample
+mlflow ui --backend-store-uri sqlite:///mlflow.db
